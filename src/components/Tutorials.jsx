@@ -1,5 +1,5 @@
 // Tutorial player — animates SVG paths step-by-step with stroke-dashoffset.
-const { useState, useEffect, useRef, useMemo } = React;
+import { useState, useEffect, useMemo } from 'react';
 
 function pathLength(d) {
   // Approximate by creating a hidden path element
@@ -13,13 +13,12 @@ function TutorialPlayer({ tutorial, lang, t, onClose, onPick, stroke = '#fff' })
   const [step, setStep] = useState(0);
   const [playKey, setPlayKey] = useState(0);
   const [animating, setAnimating] = useState(true);
-  if (!tutorial) return null;
 
-  const total = tutorial.steps.length;
-  const current = tutorial.steps[step];
+  const total = tutorial?.steps?.length ?? 0;
+  const current = tutorial?.steps?.[step];
 
-  // Compose all previously-completed paths (static) + current paths (animating)
   const priorPaths = useMemo(() => {
+    if (!tutorial) return [];
     const arr = [];
     for (let i = 0; i < step; i++) {
       tutorial.steps[i].paths.forEach((d) => arr.push(d));
@@ -28,10 +27,13 @@ function TutorialPlayer({ tutorial, lang, t, onClose, onPick, stroke = '#fff' })
   }, [tutorial, step]);
 
   useEffect(() => {
+    if (!current) return undefined;
     setAnimating(true);
-    const t = setTimeout(() => setAnimating(false), 200 + 800 * (current?.paths.length || 1));
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setAnimating(false), 200 + 800 * (current.paths.length || 1));
+    return () => clearTimeout(timer);
   }, [step, playKey, current]);
+
+  if (!tutorial) return null;
 
   return (
     <div className="tut-panel">
@@ -128,5 +130,4 @@ function TutorialLibrary({ tutorials, lang, t, onPick, onClose }) {
   );
 }
 
-window.TutorialPlayer = TutorialPlayer;
-window.TutorialLibrary = TutorialLibrary;
+export { TutorialPlayer, TutorialLibrary };

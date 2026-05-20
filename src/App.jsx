@@ -1,5 +1,17 @@
 // Main app — Drawing Buddy
-const { useState, useEffect, useRef, useCallback } = React;
+import { useState, useEffect, useRef, useCallback } from 'react';
+import DrawingCanvas from './components/DrawingCanvas.jsx';
+import { TutorialPlayer, TutorialLibrary } from './components/Tutorials.jsx';
+import { I18N, TUTORIALS } from './data/i18n.js';
+// import { recognizeDrawing, speak } from './lib/recognize.js';
+import { applyPageSeo, getInitialLang } from './lib/seo.js';
+import {
+  useTweaks,
+  TweaksPanel,
+  TweakSection,
+  TweakRadio,
+  TweakToggle,
+} from './components/TweaksPanel.jsx';
 
 // 16 chalk colors — dusty pastels that read well on dark green
 const CHALK_COLORS = [
@@ -26,7 +38,6 @@ const THEMES = {
     board: '#27433a',
     boardOverlay: 'radial-gradient(ellipse at 30% 20%, rgba(255,255,255,.05), transparent 60%), radial-gradient(ellipse at 70% 80%, rgba(255,255,255,.03), transparent 55%)',
     chalk: CHALK_COLORS,
-    chalkTexture: true,
     paletteBg: '#3a2418',
     paletteText: '#f6ebd7',
     ledgeBg: 'linear-gradient(180deg, #8b5a2b, #5a3818)',
@@ -39,7 +50,6 @@ const THEMES = {
     board: '#d4b483',
     boardOverlay: 'repeating-linear-gradient(45deg, rgba(120,80,40,.04) 0 2px, transparent 2px 6px), radial-gradient(ellipse at 50% 50%, rgba(80,50,20,.08), transparent 70%)',
     chalk: CRAYON_COLORS,
-    chalkTexture: true,
     paletteBg: '#2a1a0a',
     paletteText: '#f0e0c0',
     ledgeBg: 'linear-gradient(180deg, #6b4423, #3a2010)',
@@ -52,7 +62,6 @@ const THEMES = {
     board: '#3a3a3e',
     boardOverlay: 'radial-gradient(ellipse at 35% 25%, rgba(255,255,255,.06), transparent 60%), radial-gradient(ellipse at 65% 75%, rgba(0,0,0,.15), transparent 60%)',
     chalk: CHALK_COLORS,
-    chalkTexture: true,
     paletteBg: '#1a1a1a',
     paletteText: '#f0f0f0',
     ledgeBg: 'linear-gradient(180deg, #3d3d3d, #1a1a1a)',
@@ -61,8 +70,8 @@ const THEMES = {
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "theme": "classic",
-  "voice": true,
-  "autoRecognize": true,
+  "voice": false,
+  "autoRecognize": false,
   "idleHint": true
 }/*EDITMODE-END*/;
 
@@ -87,6 +96,7 @@ const Icon = ({ name, size = 18 }) => {
   }
 };
 
+/* AI_RECOGNIZE_OFF — 画完识别反馈气泡，恢复时取消注释
 function FeedbackBubble({ visible, text, onClose, thinking }) {
   if (!visible) return null;
   return (
@@ -109,6 +119,7 @@ function FeedbackBubble({ visible, text, onClose, thinking }) {
     </div>
   );
 }
+*/
 
 function IdleHint({ visible, t, onYes, onNo }) {
   if (!visible) return null;
@@ -158,15 +169,19 @@ function Gallery({ works, lang, t, onClose, onDelete, onLoad }) {
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const theme = THEMES[t.theme] || THEMES.classic;
-  const [lang, setLang] = useState('zh');
-  const L = window.I18N[lang];
+  const [lang, setLang] = useState(getInitialLang);
+  const L = I18N[lang];
+
+  useEffect(() => {
+    applyPageSeo(lang);
+  }, [lang]);
 
   const [color, setColor] = useState(theme.chalk[0]);
   const [size, setSize] = useState(6);
   const [mode, setMode] = useState('draw'); // draw | eraser
   const canvasRef = useRef(null);
 
-  const [feedback, setFeedback] = useState({ visible: false, text: '', thinking: false });
+  // const [feedback, setFeedback] = useState({ visible: false, text: '', thinking: false });
   const [tutorial, setTutorial] = useState(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -187,15 +202,10 @@ function App() {
     if (!theme.chalk.includes(color)) setColor(theme.chalk[0]);
   }, [t.theme]);
 
-  // Load voices once
-  useEffect(() => {
-    if (window.speechSynthesis) window.speechSynthesis.getVoices();
-  }, []);
-
   // Idle timer for "我不会画" prompt
   const idleTimer = useRef(null);
   const lastActivity = useRef(Date.now());
-  const recognizeTimer = useRef(null);
+  // const recognizeTimer = useRef(null);
 
   const bumpActivity = useCallback(() => {
     lastActivity.current = Date.now();
@@ -216,23 +226,8 @@ function App() {
     return () => idleTimer.current && clearTimeout(idleTimer.current);
   }, [bumpActivity]);
 
-  const speakIfOn = (text) => { if (t.voice) window.speak(text, lang); };
-
-  const handleStrokeStart = () => {
-    bumpActivity();
-    setIdleVisible(false);
-    if (recognizeTimer.current) clearTimeout(recognizeTimer.current);
-  };
-
-  const handleStrokeEnd = () => {
-    bumpActivity();
-    if (!t.autoRecognize) return;
-    if (recognizeTimer.current) clearTimeout(recognizeTimer.current);
-    // Wait for the child to pause for ~2.5s before guessing
-    recognizeTimer.current = setTimeout(() => {
-      runRecognition();
-    }, 2500);
-  };
+  /* AI_RECOGNIZE_OFF — 语音与画完自动识别
+  const speakIfOn = (text) => { if (t.voice) speak(text, lang); };
 
   const runRecognition = async () => {
     const c = canvasRef.current;
@@ -243,10 +238,11 @@ function App() {
       return;
     }
     setFeedback({ visible: true, text: '', thinking: true });
-    const grid = c.getInkGrid(28, 21);
+    const image = c.capture(480);
+    const grid = c.getInkGrid(48, 36);
     let res;
     try {
-      res = await window.recognizeDrawing({ grid, lang });
+      res = await recognizeDrawing({ image, grid, lang });
     } catch (e) {
       res = { ok: false };
     }
@@ -259,6 +255,16 @@ function App() {
     setFeedback({ visible: true, text: txt, thinking: false });
     speakIfOn(txt);
   };
+  */
+
+  const handleStrokeStart = () => {
+    bumpActivity();
+    setIdleVisible(false);
+  };
+
+  const handleStrokeEnd = () => {
+    bumpActivity();
+  };
 
   const handleUndo = () => { canvasRef.current?.undo(); bumpActivity(); };
   const handleRedo = () => { canvasRef.current?.redo(); bumpActivity(); };
@@ -266,7 +272,6 @@ function App() {
     if (!canvasRef.current?.hasInk?.()) return;
     if (window.confirm(L.confirmClear)) {
       canvasRef.current?.clear();
-      setFeedback({ visible: false, text: '', thinking: false });
     }
   };
   const handleSave = () => {
@@ -320,6 +325,7 @@ function App() {
           </div>
         </div>
         <div className="hb-top-right">
+          {/* AI_RECOGNIZE_OFF — 语音开关
           <button
             className="hb-iconbtn"
             onClick={() => setTweak('voice', !t.voice)}
@@ -327,7 +333,18 @@ function App() {
           >
             <Icon name={t.voice ? 'speaker-on' : 'speaker-off'} />
           </button>
-          <button className="hb-iconbtn lang" onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}>
+          */}
+          <button
+            className="hb-iconbtn lang"
+            onClick={() => {
+              const next = lang === 'zh' ? 'en' : 'zh';
+              setLang(next);
+              const url = new URL(window.location.href);
+              if (next === 'en') url.searchParams.set('lang', 'en');
+              else url.searchParams.delete('lang');
+              window.history.replaceState(null, '', url);
+            }}
+          >
             {lang === 'zh' ? '中 / EN' : 'EN / 中'}
           </button>
           <button className="hb-iconbtn" onClick={() => setLibraryOpen(true)} title={L.library}>
@@ -337,6 +354,16 @@ function App() {
             <Icon name="gallery" /> <span className="lbl">{L.gallery}</span>
           </button>
         </div>
+        {/* AI_RECOGNIZE_OFF — 识别反馈气泡
+        <div className="hb-top-center">
+          <FeedbackBubble
+            visible={feedback.visible}
+            text={feedback.text}
+            thinking={feedback.thinking}
+            onClose={() => setFeedback({ visible: false, text: '', thinking: false })}
+          />
+        </div>
+        */}
       </header>
 
       {/* Main board area */}
@@ -352,15 +379,8 @@ function App() {
               size={size}
               mode={mode}
               boardBg={theme.board}
-              chalkTexture={theme.chalkTexture}
               onStrokeStart={handleStrokeStart}
               onStrokeEnd={handleStrokeEnd}
-            />
-            <FeedbackBubble
-              visible={feedback.visible}
-              text={feedback.text}
-              thinking={feedback.thinking}
-              onClose={() => setFeedback({ visible: false, text: '', thinking: false })}
             />
             <IdleHint
               visible={idleVisible}
@@ -439,17 +459,19 @@ function App() {
               <Icon name="help" />
               <span>{L.dontKnow}</span>
             </button>
+            {/* AI_RECOGNIZE_OFF — 手动猜画
             <button className="cta primary" onClick={runRecognition} title={L.thinking}>
               <Icon name="sparkle" />
               <span>{lang === 'zh' ? '猜猜我画的是什么' : 'Guess what I drew'}</span>
             </button>
+            */}
           </div>
         </div>
       </main>
 
       {libraryOpen && (
         <TutorialLibrary
-          tutorials={window.TUTORIALS}
+          tutorials={TUTORIALS}
           lang={lang}
           t={L}
           onClose={() => setLibraryOpen(false)}
@@ -469,22 +491,25 @@ function App() {
 
       {toast && <div className="hb-toast">{toast}</div>}
 
-      <TweaksPanel>
-        <TweakSection label={lang === 'zh' ? '视觉风格' : 'Visual style'} />
-        <TweakRadio
-          label={lang === 'zh' ? '画板' : 'Board'}
-          value={t.theme}
-          options={['classic', 'kraft', 'slate']}
-          onChange={(v) => setTweak('theme', v)}
-        />
-        <TweakSection label={lang === 'zh' ? '行为' : 'Behavior'} />
-        <TweakToggle label={lang === 'zh' ? '语音朗读' : 'Voice (TTS)'} value={t.voice} onChange={(v) => setTweak('voice', v)} />
-        <TweakToggle label={lang === 'zh' ? '画完自动猜' : 'Auto recognize'} value={t.autoRecognize} onChange={(v) => setTweak('autoRecognize', v)} />
-        <TweakToggle label={lang === 'zh' ? '空闲时提示' : 'Idle hint'} value={t.idleHint} onChange={(v) => setTweak('idleHint', v)} />
-      </TweaksPanel>
+      {import.meta.env.DEV && (
+        <TweaksPanel>
+          <TweakSection label={lang === 'zh' ? '视觉风格' : 'Visual style'} />
+          <TweakRadio
+            label={lang === 'zh' ? '画板' : 'Board'}
+            value={t.theme}
+            options={['classic', 'kraft', 'slate']}
+            onChange={(v) => setTweak('theme', v)}
+          />
+          <TweakSection label={lang === 'zh' ? '行为' : 'Behavior'} />
+          {/* AI_RECOGNIZE_OFF
+          <TweakToggle label={lang === 'zh' ? '语音朗读' : 'Voice (TTS)'} value={t.voice} onChange={(v) => setTweak('voice', v)} />
+          <TweakToggle label={lang === 'zh' ? '画完自动猜' : 'Auto recognize'} value={t.autoRecognize} onChange={(v) => setTweak('autoRecognize', v)} />
+          */}
+          <TweakToggle label={lang === 'zh' ? '空闲时提示' : 'Idle hint'} value={t.idleHint} onChange={(v) => setTweak('idleHint', v)} />
+        </TweaksPanel>
+      )}
     </div>
   );
 }
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+export default App;

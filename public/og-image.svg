@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="; Drawing Buddy">
+  <rect width="1200" height="630" fill="#e3d2b0"/>
+  <rect x="80" y="80" width="1040" height="470" rx="28" fill="#6b4423"/>
+  <rect x="120" y="120" width="960" height="390" rx="12" fill="#27433a"/>
+  <path d="M200 380 Q320 260 440 340 T680 300 T920 360" fill="none" stroke="#fff8e7" stroke-width="14" stroke-linecap="round" opacity=".9"/>
+  <circle cx="320" cy="260" r="18" fill="#ffb1d8"/>
+  <circle cx="520" cy="300" r="14" fill="#9ee0ff"/>
+  <text x="600" y="560" text-anchor="middle" font-family="system-ui,sans-serif" font-size="52" font-weight="700" fill="#3a2418">; · Drawing Buddy</text>
+  <text x="600" y="610" text-anchor="middle" font-family="system-ui,sans-serif" font-size="28" fill="#5a3818" opacity=".8">?å(¿; · AI ; · Ø;Y</text>
+</svg>

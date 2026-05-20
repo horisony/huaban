@@ -1,0 +1,18 @@
+{
+  "name": "小画板 Drawing Buddy",
+  "short_name": "小画板",
+  "description": "儿童在线画板：粉笔涂鸦、绘画教程、AI 猜画与语音陪伴",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#e3d2b0",
+  "theme_color": "#e3d2b0",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "110x106",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

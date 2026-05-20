@@ -1,8 +1,8 @@
 // Drawing canvas — pointer events, undo/redo, brush + eraser, capture for AI.
-const { useRef, useEffect, useState, useImperativeHandle, forwardRef, useCallback } = React;
+import { useRef, useEffect, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 
 const DrawingCanvas = forwardRef(function DrawingCanvas(props, ref) {
-  const { color, size, mode, boardBg, chalkTexture, onStrokeEnd, onStrokeStart, dpr = 2 } = props;
+  const { color, size, mode, boardBg, onStrokeEnd, onStrokeStart, dpr = 2 } = props;
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const stateRef = useRef({
@@ -15,34 +15,59 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(props, ref) {
   });
   const [hasInk, setHasInk] = useState(false);
 
-  // Resize / setup
+  // Resize / setup — sync backup avoids flash + async race that could wipe strokes
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
+
+    const lastSize = { w: 0, h: 0 };
+    let rafId = 0;
+
     const setup = () => {
       const rect = container.getBoundingClientRect();
       const w = Math.max(200, Math.floor(rect.width));
       const h = Math.max(200, Math.floor(rect.height));
-      const prevImg = canvas.width ? canvas.toDataURL() : null;
+      if (w === lastSize.w && h === lastSize.h) return;
+
+      let backup = null;
+      if (canvas.width > 0 && canvas.height > 0) {
+        backup = document.createElement('canvas');
+        backup.width = canvas.width;
+        backup.height = canvas.height;
+        backup.getContext('2d').drawImage(canvas, 0, 0);
+      }
+
+      lastSize.w = w;
+      lastSize.h = h;
+
       canvas.width = w * dpr;
       canvas.height = h * dpr;
       canvas.style.width = w + 'px';
       canvas.style.height = h + 'px';
       const ctx = canvas.getContext('2d');
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      if (prevImg) {
-        const img = new Image();
-        img.onload = () => ctx.drawImage(img, 0, 0, w, h);
-        img.src = prevImg;
+
+      if (backup) {
+        ctx.drawImage(backup, 0, 0, backup.width, backup.height, 0, 0, w, h);
       }
     };
-    setup();
-    const ro = new ResizeObserver(setup);
+
+    const scheduleSetup = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(setup);
+    };
+
+    scheduleSetup();
+    const ro = new ResizeObserver(scheduleSetup);
     ro.observe(container);
-    return () => ro.disconnect();
+    return () => {
+      cancelAnimationFrame(rafId);
+      ro.disconnect();
+    };
   }, [dpr]);
 
   const getPos = (e) => {
@@ -96,7 +121,7 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(props, ref) {
     } else {
       ctx.globalCompositeOperation = 'source-over';
       ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.92;
+      ctx.globalAlpha = 1;
       ctx.lineWidth = size;
     }
     ctx.beginPath();
@@ -116,27 +141,8 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(props, ref) {
     const ctx = canvas.getContext('2d');
     ctx.beginPath();
     ctx.moveTo(s.last.x, s.last.y);
-    // Chalk effect: jittered with multiple light passes
-    if (mode !== 'eraser' && chalkTexture) {
-      // main stroke
-      ctx.globalAlpha = 0.78;
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
-      // light fuzzy edge passes
-      for (let i = 0; i < 2; i++) {
-        const jx = (Math.random() - 0.5) * size * 0.6;
-        const jy = (Math.random() - 0.5) * size * 0.6;
-        ctx.globalAlpha = 0.15;
-        ctx.beginPath();
-        ctx.moveTo(s.last.x + jx, s.last.y + jy);
-        ctx.lineTo(p.x + jx, p.y + jy);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 0.92;
-    } else {
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
-    }
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
     s.last = p;
     if (s.strokeBounds) {
       s.strokeBounds.minX = Math.min(s.strokeBounds.minX, p.x);
@@ -211,14 +217,22 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(props, ref) {
       off.width = cols;
       off.height = rows;
       const octx = off.getContext('2d');
+      // Composite on board color so colored chalk is visible in the grid
+      octx.fillStyle = boardBg || '#27433a';
+      octx.fillRect(0, 0, cols, rows);
       octx.drawImage(canvas, 0, 0, cols, rows);
       const data = octx.getImageData(0, 0, cols, rows).data;
       let grid = '';
       for (let y = 0; y < rows; y++) {
         for (let x = 0; x < cols; x++) {
           const i = (y * cols + x) * 4;
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
           const a = data[i + 3];
-          grid += a > 30 ? '#' : '.';
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          // Chalk on dark board: bright strokes with some alpha
+          grid += a > 25 && lum > 55 ? '#' : '.';
         }
         grid += '\n';
       }
@@ -259,4 +273,4 @@ const DrawingCanvas = forwardRef(function DrawingCanvas(props, ref) {
   );
 });
 
-window.DrawingCanvas = DrawingCanvas;
+export default DrawingCanvas;

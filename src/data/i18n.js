@@ -1,7 +1,7 @@
 // Bilingual strings + tutorial library data.
 const I18N = {
   zh: {
-    appName: "小画板",
+    appName: "儿童画板",
     tagline: "陪你一起画画的小伙伴",
     listening: "听听画板的话…",
     thinking: "让我看看你画的是什么呢…",
@@ -397,6 +397,4 @@ const TUTORIALS = [
   },
 ];
 
-window.I18N = I18N;
-window.REACTIONS = REACTIONS;
-window.TUTORIALS = TUTORIALS;
+export { I18N, REACTIONS, TUTORIALS };

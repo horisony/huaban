@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# 生产构建时会写入带完整域名的 sitemap；开发环境见 /sitemap.xml
+Sitemap: /sitemap.xml
