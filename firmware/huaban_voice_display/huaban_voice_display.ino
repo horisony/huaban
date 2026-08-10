@@ -66,6 +66,7 @@ void setup() {
   lcd.begin(0, U8G2_R1);
   u8g2 = lcd.getU8g2();
   showStatus("Huaban AI", "Connect USB in the browser");
+  Serial.println("HUABAN_READY");
 }
 
 void loop() {
