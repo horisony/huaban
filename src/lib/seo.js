@@ -1,11 +1,11 @@
 const SEO = {
   zh: {
-    title: '小画板 Drawing Buddy — 儿童在线画画、AI 猜画与语音陪伴',
-    description: '免费儿童在线画板：粉笔涂鸦、分步绘画教程、作品集保存，AI 猜猜画的是什么，温柔语音鼓励。适合 3–8 岁亲子创作。',
+    title: '小画板 Drawing Buddy — 儿童在线画画、AI 互动老师',
+    description: '免费儿童在线画板：粉笔涂鸦、分步绘画教程、作品集保存，AI 互动老师能看见孩子的画并温柔引导，陪孩子一起创作。适合 3–8 岁亲子。',
   },
   en: {
-    title: 'Drawing Buddy — Kids Online Drawing Board with AI Guessing',
-    description: 'Free kids drawing board: chalk doodles, step-by-step tutorials, gallery saves, AI guesses your drawing with gentle voice feedback. Ages 3–8.',
+    title: 'Drawing Buddy — Kids Online Drawing Board with AI Teacher',
+    description: 'Free kids drawing board: chalk doodles, step-by-step tutorials, gallery saves, and a live AI teacher who sees the drawing and guides gently. Ages 3–8.',
   },
 };
 

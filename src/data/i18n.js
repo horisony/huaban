@@ -3,8 +3,6 @@ const I18N = {
   zh: {
     appName: "儿童画板",
     tagline: "陪你一起画画的小伙伴",
-    listening: "听听画板的话…",
-    thinking: "让我看看你画的是什么呢…",
     drawSomething: "在黑板上画点什么吧～",
     dontKnow: "我不会画",
     showTutorial: "教我画",
@@ -31,16 +29,21 @@ const I18N = {
     delete: "删除",
     step: "第 {n} 步",
     of: "共 {n} 步",
-    voiceOn: "声音开",
-    voiceOff: "声音关",
     chooseTutorial: "想画什么呢？",
-    aiUnavailable: "嗯…让我再想想",
+    teacherStart: "和老师聊聊",
+    teacherStop: "结束聊天",
+    teacherLook: "看看我的画",
+    teacherGuess: "猜猜我画的是什么",
+    teacherConnecting: "正在叫老师来…",
+    teacherLive: "老师在呢，想说什么都可以～",
+    teacherListening: "正在听你说话…",
+    teacherSpeaking: "老师正在说…",
+    teacher: "老师",
+    me: "我",
   },
   en: {
     appName: "Drawing Buddy",
     tagline: "Your little drawing companion",
-    listening: "Listening to the board…",
-    thinking: "Let me see what you drew…",
     drawSomething: "Draw something on the board~",
     dontKnow: "I don't know how",
     showTutorial: "Teach me",
@@ -67,32 +70,18 @@ const I18N = {
     delete: "Delete",
     step: "Step {n}",
     of: "of {n}",
-    voiceOn: "Voice on",
-    voiceOff: "Voice off",
     chooseTutorial: "What shall we draw?",
-    aiUnavailable: "Hmm… let me think a bit",
+    teacherStart: "Talk to teacher",
+    teacherStop: "End chat",
+    teacherLook: "Look at my drawing",
+    teacherGuess: "Guess what I drew",
+    teacherConnecting: "Calling the teacher…",
+    teacherLive: "The teacher is here — say hi!~",
+    teacherListening: "Listening…",
+    teacherSpeaking: "Teacher is speaking…",
+    teacher: "Teacher",
+    me: "You",
   },
-};
-
-// Gentle, warm reactions used after AI recognition.
-// {thing} substituted with localized noun.
-const REACTIONS = {
-  zh: [
-    "哇～是{thing}！画得好可爱呀～",
-    "看到啦，是一只{thing}对不对？真棒！",
-    "好喜欢这个{thing}，颜色也好看～",
-    "嘿嘿，是{thing}吧？我猜对了吗？",
-    "好可爱的{thing}呀～你真厉害！",
-    "{thing}画得真有感觉呢，继续加油～",
-  ],
-  en: [
-    "Oh! Is that a {thing}? So cute!",
-    "I see it — a lovely {thing}! Well done!",
-    "Aww, what a sweet {thing}!",
-    "Is that a {thing}? You got it!",
-    "Such a charming {thing} — keep going~",
-    "That {thing} is wonderful, you're amazing!",
-  ],
 };
 
 // Tutorial library — each step is a list of SVG path strings to animate sequentially.
@@ -397,4 +386,4 @@ const TUTORIALS = [
   },
 ];
 
-export { I18N, REACTIONS, TUTORIALS };
+export { I18N, TUTORIALS };

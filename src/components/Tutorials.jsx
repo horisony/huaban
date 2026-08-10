@@ -9,7 +9,7 @@ function pathLength(d) {
   return p.getTotalLength ? Math.max(20, p.getTotalLength()) : 800;
 }
 
-function TutorialPlayer({ tutorial, lang, t, onClose, onPick, stroke = '#fff' }) {
+function TutorialPlayer({ tutorial, lang, t, onClose, onPick, onStepChange, stroke = '#fff' }) {
   const [step, setStep] = useState(0);
   const [playKey, setPlayKey] = useState(0);
   const [animating, setAnimating] = useState(true);
@@ -32,6 +32,19 @@ function TutorialPlayer({ tutorial, lang, t, onClose, onPick, stroke = '#fff' })
     const timer = setTimeout(() => setAnimating(false), 200 + 800 * (current.paths.length || 1));
     return () => clearTimeout(timer);
   }, [step, playKey, current]);
+
+  // 告诉老师当前教程进度（GPT Live 画画指导用）
+  useEffect(() => {
+    if (onStepChange && tutorial && current) {
+      onStepChange({
+        id: tutorial.id,
+        name: tutorial.name[lang],
+        step,
+        total,
+        hint: current.hint[lang],
+      });
+    }
+  }, [tutorial, step, total, current, lang, onStepChange]);
 
   if (!tutorial) return null;
 

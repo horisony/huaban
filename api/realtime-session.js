@@ -1,5 +1,4 @@
-import { ENABLE_AI_RECOGNIZE_AND_VOICE } from '../shared/features.js';
-import { synthesizeSpeech } from '../shared/ttsCore.js';
+import { createRealtimeSession } from '../shared/realtimeCore.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -12,24 +11,16 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, reason: 'method_not_allowed' });
   }
-  if (!ENABLE_AI_RECOGNIZE_AND_VOICE) {
-    return res.status(503).json({ ok: false, reason: 'feature_disabled' });
-  }
 
   try {
-    const { text, lang } = req.body || {};
-    if (!text) {
-      return res.status(400).json({ ok: false, reason: 'missing_text' });
-    }
-
-    const result = await synthesizeSpeech({ text, lang: lang || 'zh' });
+    const { lang } = req.body || {};
+    const result = await createRealtimeSession({ lang: lang === 'en' ? 'en' : 'zh' });
     if (!result) {
       return res.status(503).json({ ok: false, reason: 'no_api_key' });
     }
-
     return res.status(200).json({ ok: true, ...result });
   } catch (err) {
-    console.error('[api/tts]', err);
+    console.error('[api/realtime-session]', err);
     return res.status(500).json({ ok: false, reason: 'server_error' });
   }
 }

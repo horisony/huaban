@@ -2,9 +2,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import DrawingCanvas from './components/DrawingCanvas.jsx';
 import { TutorialPlayer, TutorialLibrary } from './components/Tutorials.jsx';
+import TeacherBar from './components/TeacherBar.jsx';
 import { I18N, TUTORIALS } from './data/i18n.js';
-// import { recognizeDrawing, speak } from './lib/recognize.js';
 import { applyPageSeo, getInitialLang } from './lib/seo.js';
+import { useLiveTeacher } from './lib/useLiveTeacher.js';
+import { Esp32Bridge } from './lib/esp32Bridge.js';
+import { useVoiceDrawing } from './lib/useVoiceDrawing.js';
 import {
   useTweaks,
   TweaksPanel,
@@ -70,9 +73,8 @@ const THEMES = {
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "theme": "classic",
-  "voice": false,
-  "autoRecognize": false,
-  "idleHint": true
+  "idleHint": true,
+  "autoLook": true
 }/*EDITMODE-END*/;
 
 // Small inline SVG icons (kept simple, no decorative slop)
@@ -95,31 +97,6 @@ const Icon = ({ name, size = 18 }) => {
     default: return null;
   }
 };
-
-/* AI_RECOGNIZE_OFF — 画完识别反馈气泡，恢复时取消注释
-function FeedbackBubble({ visible, text, onClose, thinking }) {
-  if (!visible) return null;
-  return (
-    <div className="fb-bubble">
-      <div className="fb-avatar">
-        <div className="fb-bear">🐻</div>
-      </div>
-      <div className="fb-content">
-        {thinking ? (
-          <div className="fb-thinking">
-            <span className="fb-dot" />
-            <span className="fb-dot" />
-            <span className="fb-dot" />
-          </div>
-        ) : (
-          <div className="fb-text">{text}</div>
-        )}
-        {!thinking && <button className="fb-close" onClick={onClose} aria-label="close">×</button>}
-      </div>
-    </div>
-  );
-}
-*/
 
 function IdleHint({ visible, t, onYes, onNo }) {
   if (!visible) return null;
@@ -180,8 +157,43 @@ function App() {
   const [size, setSize] = useState(6);
   const [mode, setMode] = useState('draw'); // draw | eraser
   const canvasRef = useRef(null);
+  const esp32Ref = useRef(new Esp32Bridge());
+  const [esp32Connected, setEsp32Connected] = useState(false);
 
-  // const [feedback, setFeedback] = useState({ visible: false, text: '', thinking: false });
+  const handleGeneratedImage = useCallback((result) => {
+    canvasRef.current?.loadDataURL(result.image);
+    if (esp32Ref.current.connected) {
+      esp32Ref.current.sendImage(result.image).then(() => {
+        setToast(lang === 'zh' ? '画好了，已经显示到墨水屏上！' : 'Done — the picture is on the display!');
+      }).catch(() => {
+        setToast(lang === 'zh' ? '画好了，但发送到墨水屏失败了。' : 'Picture ready, but display transfer failed.');
+      });
+    } else {
+      setToast(lang === 'zh' ? 'AI 已经画好啦！' : 'Your AI picture is ready!');
+    }
+    setTimeout(() => setToast(''), 3000);
+  }, [lang]);
+
+  // GPT Live 互动老师（能看到画板 + 语音对话）
+  const teacher = useLiveTeacher({
+    lang,
+    autoLook: t.autoLook !== false,
+    getSnapshot: () => canvasRef.current?.capture(720),
+    hasInk: () => canvasRef.current?.hasInk?.(),
+    onGeneratedImage: handleGeneratedImage,
+  });
+  const voiceDrawing = useVoiceDrawing({
+    lang,
+    onGeneratedImage: handleGeneratedImage,
+    onError: (error) => {
+      const unsupported = error?.message === 'speech_recognition_unsupported';
+      setToast(unsupported
+        ? (lang === 'zh' ? '当前浏览器不支持语音识别，请使用 Chrome。' : 'Use Chrome for voice recognition.')
+        : (lang === 'zh' ? '语音画画暂时不可用，请再试一次。' : 'Voice drawing is temporarily unavailable.'));
+      setTimeout(() => setToast(''), 3000);
+    },
+  });
+
   const [tutorial, setTutorial] = useState(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -196,6 +208,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem('huaban_gallery', JSON.stringify(works));
   }, [works]);
+
+  // 老师出错时用 toast 提示
+  useEffect(() => {
+    if (!teacher.error) return;
+    setToast(teacher.error);
+    const id = setTimeout(() => setToast(''), 5000);
+    return () => clearTimeout(id);
+  }, [teacher.error]);
 
   // Update color when theme switches
   useEffect(() => {
@@ -226,37 +246,6 @@ function App() {
     return () => idleTimer.current && clearTimeout(idleTimer.current);
   }, [bumpActivity]);
 
-  /* AI_RECOGNIZE_OFF — 语音与画完自动识别
-  const speakIfOn = (text) => { if (t.voice) speak(text, lang); };
-
-  const runRecognition = async () => {
-    const c = canvasRef.current;
-    if (!c) return;
-    if (!c.hasInk?.()) {
-      setFeedback({ visible: true, text: L.empty, thinking: false });
-      speakIfOn(L.empty);
-      return;
-    }
-    setFeedback({ visible: true, text: '', thinking: true });
-    const image = c.capture(480);
-    const grid = c.getInkGrid(48, 36);
-    let res;
-    try {
-      res = await recognizeDrawing({ image, grid, lang });
-    } catch (e) {
-      res = { ok: false };
-    }
-    if (!res.ok) {
-      setFeedback({ visible: true, text: L.aiUnavailable, thinking: false });
-      speakIfOn(L.aiUnavailable);
-      return;
-    }
-    const txt = res.reaction[lang];
-    setFeedback({ visible: true, text: txt, thinking: false });
-    speakIfOn(txt);
-  };
-  */
-
   const handleStrokeStart = () => {
     bumpActivity();
     setIdleVisible(false);
@@ -264,6 +253,7 @@ function App() {
 
   const handleStrokeEnd = () => {
     bumpActivity();
+    teacher.noteStroke();
   };
 
   const handleUndo = () => { canvasRef.current?.undo(); bumpActivity(); };
@@ -294,10 +284,52 @@ function App() {
   };
   const handleDeleteWork = (id) => setWorks((ws) => ws.filter((w) => w.id !== id));
 
+  const handleEsp32Connect = async () => {
+    try {
+      if (esp32Ref.current.connected) {
+        await esp32Ref.current.disconnect();
+        setEsp32Connected(false);
+        return;
+      }
+      await esp32Ref.current.connect();
+      setEsp32Connected(true);
+      setToast(lang === 'zh' ? '墨水屏已连接' : 'Display connected');
+      setTimeout(() => setToast(''), 2000);
+    } catch (error) {
+      const unsupported = error?.message === 'web_serial_unsupported';
+      setToast(unsupported
+        ? (lang === 'zh' ? '当前浏览器不支持 USB 串口，请使用 Chrome。' : 'Use Chrome for USB Serial support.')
+        : (lang === 'zh' ? '没有连接墨水屏。' : 'Display was not connected.'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  };
+
+  const handleTeacherLook = (kind = 'manual') => {
+    if (!canvasRef.current?.hasInk?.()) {
+      setToast(L.empty);
+      setTimeout(() => setToast(''), 2000);
+      return;
+    }
+    teacher.lookNow(kind);
+  };
+
+  const handleTutorialStep = (info) => {
+    teacher.setTutorial(info);
+  };
+
   const startTutorial = (tut) => {
     setTutorial(tut);
     setLibraryOpen(false);
     setIdleVisible(false);
+    // 开始学画时告诉老师，让老师跟着这一步指导
+    const first = tut.steps?.[0];
+    teacher.setTutorial({
+      id: tut.id,
+      name: tut.name[lang],
+      step: 0,
+      total: tut.steps?.length ?? 0,
+      hint: first?.hint?.[lang] || '',
+    });
   };
 
   return (
@@ -325,15 +357,14 @@ function App() {
           </div>
         </div>
         <div className="hb-top-right">
-          {/* AI_RECOGNIZE_OFF — 语音开关
           <button
-            className="hb-iconbtn"
-            onClick={() => setTweak('voice', !t.voice)}
-            title={t.voice ? L.voiceOn : L.voiceOff}
+            className={`hb-iconbtn ${esp32Connected ? 'device-on' : ''}`}
+            onClick={handleEsp32Connect}
+            title={lang === 'zh' ? '连接墨水屏' : 'Connect display'}
           >
-            <Icon name={t.voice ? 'speaker-on' : 'speaker-off'} />
+            <span aria-hidden="true">▣</span>
+            <span className="lbl">{esp32Connected ? (lang === 'zh' ? '墨水屏已连接' : 'Display on') : (lang === 'zh' ? '连接墨水屏' : 'Connect display')}</span>
           </button>
-          */}
           <button
             className="hb-iconbtn lang"
             onClick={() => {
@@ -354,16 +385,19 @@ function App() {
             <Icon name="gallery" /> <span className="lbl">{L.gallery}</span>
           </button>
         </div>
-        {/* AI_RECOGNIZE_OFF — 识别反馈气泡
         <div className="hb-top-center">
-          <FeedbackBubble
-            visible={feedback.visible}
-            text={feedback.text}
-            thinking={feedback.thinking}
-            onClose={() => setFeedback({ visible: false, text: '', thinking: false })}
-          />
+          {teacher.live && (
+            <TeacherBar
+              status={teacher.status}
+              messages={teacher.messages}
+              error={teacher.error}
+              t={L}
+              onLook={handleTeacherLook}
+              onGuess={() => handleTeacherLook('guess')}
+              onStop={teacher.stop}
+            />
+          )}
         </div>
-        */}
       </header>
 
       {/* Main board area */}
@@ -394,8 +428,9 @@ function App() {
                 lang={lang}
                 t={L}
                 stroke={color === '#000000' ? '#ffffff' : color}
-                onClose={() => setTutorial(null)}
+                onClose={() => { teacher.setTutorial(null); setTutorial(null); }}
                 onPick={() => setLibraryOpen(true)}
+                onStepChange={handleTutorialStep}
               />
             )}
           </div>
@@ -459,12 +494,29 @@ function App() {
               <Icon name="help" />
               <span>{L.dontKnow}</span>
             </button>
-            {/* AI_RECOGNIZE_OFF — 手动猜画
-            <button className="cta primary" onClick={runRecognition} title={L.thinking}>
-              <Icon name="sparkle" />
-              <span>{lang === 'zh' ? '猜猜我画的是什么' : 'Guess what I drew'}</span>
+            <button
+              className={`cta primary ${voiceDrawing.active ? 'live-on' : ''}`}
+              onClick={voiceDrawing.start}
+              disabled={voiceDrawing.status === 'generating'}
+              title={lang === 'zh' ? '说出你想画的东西' : 'Say what you want to draw'}
+            >
+              <Icon name="speaker-on" />
+              <span>{voiceDrawing.status === 'listening'
+                ? (lang === 'zh' ? '正在听…' : 'Listening…')
+                : voiceDrawing.status === 'generating'
+                  ? (lang === 'zh' ? 'AI 正在画…' : 'AI is drawing…')
+                  : voiceDrawing.status === 'speaking'
+                    ? (lang === 'zh' ? '正在回答…' : 'Speaking…')
+                    : (lang === 'zh' ? '语音画画' : 'Voice drawing')}</span>
             </button>
-            */}
+            <button
+              className={`cta primary ${teacher.live ? 'live-on' : ''}`}
+              onClick={teacher.live ? teacher.stop : teacher.start}
+              title={teacher.live ? L.teacherStop : L.teacherStart}
+            >
+              <Icon name="sparkle" />
+              <span>{teacher.live ? L.teacherStop : L.teacherStart}</span>
+            </button>
           </div>
         </div>
       </main>
@@ -501,10 +553,7 @@ function App() {
             onChange={(v) => setTweak('theme', v)}
           />
           <TweakSection label={lang === 'zh' ? '行为' : 'Behavior'} />
-          {/* AI_RECOGNIZE_OFF
-          <TweakToggle label={lang === 'zh' ? '语音朗读' : 'Voice (TTS)'} value={t.voice} onChange={(v) => setTweak('voice', v)} />
-          <TweakToggle label={lang === 'zh' ? '画完自动猜' : 'Auto recognize'} value={t.autoRecognize} onChange={(v) => setTweak('autoRecognize', v)} />
-          */}
+          <TweakToggle label={lang === 'zh' ? '老师自动看画' : 'Teacher auto-look'} value={t.autoLook !== false} onChange={(v) => setTweak('autoLook', v)} />
           <TweakToggle label={lang === 'zh' ? '空闲时提示' : 'Idle hint'} value={t.idleHint} onChange={(v) => setTweak('idleHint', v)} />
         </TweaksPanel>
       )}
