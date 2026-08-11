@@ -66,6 +66,7 @@ export class Esp32Bridge {
     this.port = null;
     this.readText = '';
     this.sendQueue = Promise.resolve();
+    this.connectPromise = null;
   }
 
   get supported() {
@@ -73,13 +74,45 @@ export class Esp32Bridge {
   }
 
   get connected() {
-    return !!this.port?.writable;
+    return !!this.port?.readable && !!this.port?.writable;
+  }
+
+  matchesDevice(port) {
+    const info = port?.getInfo?.() || {};
+    return info.usbVendorId === USB_FILTERS[0].usbVendorId
+      && info.usbProductId === USB_FILTERS[0].usbProductId;
+  }
+
+  async openPort(port) {
+    if (this.connected && this.port === port) return true;
+    if (this.connectPromise) return this.connectPromise;
+    this.connectPromise = (async () => {
+      this.port = port;
+      if (!port.readable || !port.writable) {
+        await port.open({ baudRate: 921600, bufferSize: 32768 });
+      }
+      this.readText = '';
+      return true;
+    })();
+    try {
+      return await this.connectPromise;
+    } finally {
+      this.connectPromise = null;
+    }
   }
 
   async connect() {
     if (!this.supported) throw new Error('web_serial_unsupported');
-    this.port = await navigator.serial.requestPort({ filters: USB_FILTERS });
-    await this.port.open({ baudRate: 921600, bufferSize: 32768 });
+    const port = await navigator.serial.requestPort({ filters: USB_FILTERS });
+    return this.openPort(port);
+  }
+
+  async connectAuthorized() {
+    if (!this.supported) return false;
+    const ports = await navigator.serial.getPorts();
+    const port = ports.find((candidate) => this.matchesDevice(candidate));
+    if (!port) return false;
+    return this.openPort(port);
   }
 
   async disconnect() {

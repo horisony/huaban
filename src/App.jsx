@@ -204,6 +204,29 @@ function App() {
   const [idleVisible, setIdleVisible] = useState(false);
   const [toast, setToast] = useState('');
 
+  // Restore a previously granted Web Serial connection after page reloads.
+  useEffect(() => {
+    let active = true;
+    const bridge = esp32Ref.current;
+    bridge.connectAuthorized().then((connected) => {
+      if (active && connected) setEsp32Connected(true);
+    }).catch(() => {
+      if (active) setEsp32Connected(false);
+    });
+
+    const handleDisconnect = (event) => {
+      if (!bridge.port || event.port === bridge.port) {
+        bridge.port = null;
+        if (active) setEsp32Connected(false);
+      }
+    };
+    navigator.serial?.addEventListener('disconnect', handleDisconnect);
+    return () => {
+      active = false;
+      navigator.serial?.removeEventListener('disconnect', handleDisconnect);
+    };
+  }, []);
+
   // Persist gallery
   useEffect(() => {
     localStorage.setItem('huaban_gallery', JSON.stringify(works));
