@@ -54,6 +54,10 @@ export async function imageToU8g2Frame(dataUrl) {
       }
     }
   }
+  // ST7305 is configured in display-inversion mode: 1 is white and 0 is black.
+  // XBM normally uses 1 for the foreground, so invert the finished frame to
+  // preserve the intended white background and black drawing lines.
+  for (let i = 0; i < out.length; i++) out[i] ^= 0xff;
   return out;
 }
 
