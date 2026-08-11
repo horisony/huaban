@@ -3,10 +3,7 @@ const FRAME_WIDTH = 400;
 const FRAME_HEIGHT = 300;
 const FRAME_BYTES = FRAME_WIDTH * Math.ceil(FRAME_HEIGHT / 8);
 const USB_CHUNK_BYTES = 256;
-
-function pause(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const SERIAL_RESPONSE_TIMEOUT = 15000;
 
 function waitForImage(dataUrl) {
   return new Promise((resolve, reject) => {
@@ -62,6 +59,8 @@ export async function imageToU8g2Frame(dataUrl) {
 export class Esp32Bridge {
   constructor() {
     this.port = null;
+    this.readText = '';
+    this.sendQueue = Promise.resolve();
   }
 
   get supported() {
@@ -84,7 +83,37 @@ export class Esp32Bridge {
     this.port = null;
   }
 
-  async sendImage(dataUrl) {
+  async readLine(reader) {
+    const decoder = new TextDecoder();
+    const deadline = Date.now() + SERIAL_RESPONSE_TIMEOUT;
+    while (Date.now() < deadline) {
+      const newline = this.readText.indexOf('\n');
+      if (newline >= 0) {
+        const line = this.readText.slice(0, newline).trim();
+        this.readText = this.readText.slice(newline + 1);
+        if (line) return line;
+        continue;
+      }
+      const remaining = deadline - Date.now();
+      const result = await Promise.race([
+        reader.read(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('serial_response_timeout')), remaining)),
+      ]);
+      if (result.done) throw new Error('serial_disconnected');
+      this.readText += decoder.decode(result.value, { stream: true });
+    }
+    throw new Error('serial_response_timeout');
+  }
+
+  async waitFor(reader, expected) {
+    while (true) {
+      const line = await this.readLine(reader);
+      if (line === expected) return;
+      if (line === 'HUABAN_TIMEOUT') throw new Error('device_receive_timeout');
+    }
+  }
+
+  async sendImageNow(dataUrl) {
     if (!this.connected) throw new Error('device_not_connected');
     const frame = await imageToU8g2Frame(dataUrl);
     const header = new Uint8Array(12);
@@ -92,15 +121,27 @@ export class Esp32Bridge {
     new DataView(header.buffer).setUint32(8, frame.length, true);
 
     const writer = this.port.writable.getWriter();
+    const reader = this.port.readable.getReader();
     try {
       await writer.write(header);
+      await this.waitFor(reader, 'HUABAN_GO');
       for (let offset = 0; offset < frame.length; offset += USB_CHUNK_BYTES) {
-        await writer.ready;
         await writer.write(frame.subarray(offset, offset + USB_CHUNK_BYTES));
-        await pause(2);
+        await this.waitFor(reader, 'HUABAN_NEXT');
       }
+      await this.waitFor(reader, 'HUABAN_OK');
+    } catch (error) {
+      await reader.cancel().catch(() => {});
+      throw error;
     } finally {
+      reader.releaseLock();
       writer.releaseLock();
     }
+  }
+
+  sendImage(dataUrl) {
+    const transfer = this.sendQueue.then(() => this.sendImageNow(dataUrl));
+    this.sendQueue = transfer.catch(() => {});
+    return transfer;
   }
 }

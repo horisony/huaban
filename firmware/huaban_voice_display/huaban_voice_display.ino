@@ -3,6 +3,7 @@
 #define LCD_WIDTH 400
 #define LCD_HEIGHT 300
 #define FRAME_BYTES (LCD_WIDTH * ((LCD_HEIGHT + 7) / 8))
+#define USB_CHUNK_BYTES 256
 
 #define RLCD_SCK_PIN 11
 #define RLCD_MOSI_PIN 12
@@ -87,9 +88,17 @@ void loop() {
     return;
   }
 
-  if (!readExact(frame, FRAME_BYTES, 30000)) {
-    showStatus("USB timeout", "Please send the picture again");
-    return;
+  Serial.println("HUABAN_GO");
+  size_t received = 0;
+  while (received < FRAME_BYTES) {
+    size_t chunkLength = min((size_t)USB_CHUNK_BYTES, (size_t)FRAME_BYTES - received);
+    if (!readExact(frame + received, chunkLength, 10000)) {
+      showStatus("USB timeout", "Please send the picture again");
+      Serial.println("HUABAN_TIMEOUT");
+      return;
+    }
+    received += chunkLength;
+    Serial.println("HUABAN_NEXT");
   }
 
   memcpy(u8g2->getBufferPtr(), frame, FRAME_BYTES);
