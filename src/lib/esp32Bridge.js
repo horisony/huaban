@@ -2,6 +2,11 @@ const USB_FILTERS = [{ usbVendorId: 0x303a, usbProductId: 0x1001 }];
 const FRAME_WIDTH = 400;
 const FRAME_HEIGHT = 300;
 const FRAME_BYTES = FRAME_WIDTH * Math.ceil(FRAME_HEIGHT / 8);
+const USB_CHUNK_BYTES = 256;
+
+function pause(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function waitForImage(dataUrl) {
   return new Promise((resolve, reject) => {
@@ -89,8 +94,10 @@ export class Esp32Bridge {
     const writer = this.port.writable.getWriter();
     try {
       await writer.write(header);
-      for (let offset = 0; offset < frame.length; offset += 1024) {
-        await writer.write(frame.subarray(offset, offset + 1024));
+      for (let offset = 0; offset < frame.length; offset += USB_CHUNK_BYTES) {
+        await writer.ready;
+        await writer.write(frame.subarray(offset, offset + USB_CHUNK_BYTES));
+        await pause(2);
       }
     } finally {
       writer.releaseLock();

@@ -18,28 +18,29 @@ static bool readExact(uint8_t *data, size_t length, uint32_t timeoutMs) {
   size_t received = 0;
   uint32_t lastByteAt = millis();
   while (received < length && millis() - lastByteAt < timeoutMs) {
-    int available = Serial.available();
-    if (available <= 0) {
+    if (!Serial.available()) {
       delay(1);
       continue;
     }
-    size_t count = Serial.readBytes(data + received, min((size_t)available, length - received));
-    if (count) {
-      received += count;
-      lastByteAt = millis();
-    }
+    int value = Serial.read();
+    if (value < 0) continue;
+    data[received++] = (uint8_t)value;
+    lastByteAt = millis();
   }
   return received == length;
 }
 
 static bool waitForHeader() {
   static const char magic[] = "HUABAN1\n";
-  size_t matched = 0;
+  static size_t matched = 0;
   while (Serial.available()) {
     char value = (char)Serial.read();
     if (value == magic[matched]) {
       matched++;
-      if (matched == sizeof(magic) - 1) return true;
+      if (matched == sizeof(magic) - 1) {
+        matched = 0;
+        return true;
+      }
     } else {
       matched = value == magic[0] ? 1 : 0;
     }
@@ -86,7 +87,7 @@ void loop() {
     return;
   }
 
-  if (!readExact(frame, FRAME_BYTES, 8000)) {
+  if (!readExact(frame, FRAME_BYTES, 30000)) {
     showStatus("USB timeout", "Please send the picture again");
     return;
   }
