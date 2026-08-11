@@ -36,22 +36,14 @@ export async function imageToU8g2Frame(dataUrl) {
     gray[i] = rgba[p] * 0.299 + rgba[p + 1] * 0.587 + rgba[p + 2] * 0.114;
   }
 
-  // Floyd–Steinberg dithering keeps useful detail on a true 1-bit panel.
+  // Use a clean threshold for line art. Error-diffusion dithering turns pale
+  // antialiasing and shadows into isolated black dots on a 1-bit display.
   const out = new Uint8Array(FRAME_BYTES);
   for (let y = 0; y < FRAME_HEIGHT; y++) {
     for (let x = 0; x < FRAME_WIDTH; x++) {
       const i = y * FRAME_WIDTH + x;
-      const oldValue = gray[i];
-      const white = oldValue >= 160;
-      const newValue = white ? 255 : 0;
-      if (!white) out[y * FRAME_ROW_BYTES + Math.floor(x / 8)] |= 1 << (x & 7);
-      const error = oldValue - newValue;
-      if (x + 1 < FRAME_WIDTH) gray[i + 1] += error * 7 / 16;
-      if (y + 1 < FRAME_HEIGHT) {
-        if (x > 0) gray[i + FRAME_WIDTH - 1] += error * 3 / 16;
-        gray[i + FRAME_WIDTH] += error * 5 / 16;
-        if (x + 1 < FRAME_WIDTH) gray[i + FRAME_WIDTH + 1] += error / 16;
-      }
+      const black = gray[i] < 145;
+      if (black) out[y * FRAME_ROW_BYTES + Math.floor(x / 8)] |= 1 << (x & 7);
     }
   }
   // ST7305 is configured in display-inversion mode: 1 is white and 0 is black.
