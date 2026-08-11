@@ -1,7 +1,8 @@
 const USB_FILTERS = [{ usbVendorId: 0x303a, usbProductId: 0x1001 }];
 const FRAME_WIDTH = 400;
 const FRAME_HEIGHT = 300;
-const FRAME_BYTES = FRAME_WIDTH * Math.ceil(FRAME_HEIGHT / 8);
+const FRAME_ROW_BYTES = Math.ceil(FRAME_WIDTH / 8);
+const FRAME_BYTES = FRAME_ROW_BYTES * FRAME_HEIGHT;
 const USB_CHUNK_BYTES = 256;
 const SERIAL_RESPONSE_TIMEOUT = 15000;
 
@@ -43,7 +44,7 @@ export async function imageToU8g2Frame(dataUrl) {
       const oldValue = gray[i];
       const white = oldValue >= 160;
       const newValue = white ? 255 : 0;
-      if (!white) out[x + Math.floor(y / 8) * FRAME_WIDTH] |= 1 << (y & 7);
+      if (!white) out[y * FRAME_ROW_BYTES + Math.floor(x / 8)] |= 1 << (x & 7);
       const error = oldValue - newValue;
       if (x + 1 < FRAME_WIDTH) gray[i + 1] += error * 7 / 16;
       if (y + 1 < FRAME_HEIGHT) {

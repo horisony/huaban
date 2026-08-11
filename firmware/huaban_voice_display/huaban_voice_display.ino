@@ -2,7 +2,7 @@
 
 #define LCD_WIDTH 400
 #define LCD_HEIGHT 300
-#define FRAME_BYTES (LCD_WIDTH * ((LCD_HEIGHT + 7) / 8))
+#define FRAME_BYTES (((LCD_WIDTH + 7) / 8) * LCD_HEIGHT)
 #define USB_CHUNK_BYTES 256
 
 #define RLCD_SCK_PIN 11
@@ -101,7 +101,9 @@ void loop() {
     Serial.println("HUABAN_NEXT");
   }
 
-  memcpy(u8g2->getBufferPtr(), frame, FRAME_BYTES);
+  u8g2->clearBuffer();
+  u8g2->setDrawColor(1);
+  u8g2->drawXBMP(0, 0, LCD_WIDTH, LCD_HEIGHT, frame);
   u8g2->sendBuffer();
   Serial.println("HUABAN_OK");
 }
