@@ -1,10 +1,31 @@
 #include "ST7305_U8g2.h"
+#include "codec_bsp.h"
+#include "i2c_bsp.h"
 #include <FFat.h>
+#include <HTTPClient.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <esp_heap_caps.h>
+
+#if __has_include("secrets.h")
+#include "secrets.h"
+#define HUABAN_STANDALONE_ENABLED 1
+#else
+#define HUABAN_STANDALONE_ENABLED 0
+#endif
 
 #define LCD_WIDTH 400
 #define LCD_HEIGHT 300
 #define FRAME_BYTES (((LCD_WIDTH + 7) / 8) * LCD_HEIGHT)
 #define USB_CHUNK_BYTES 256
+#define KEY_LONG_PRESS_MS 700
+#define AUDIO_SAMPLE_RATE 16000
+#define AUDIO_CHANNELS 2
+#define AUDIO_BITS_PER_SAMPLE 16
+#define AUDIO_MAX_SECONDS 20
+#define WAV_HEADER_BYTES 44
+#define AUDIO_BYTES_PER_SECOND (AUDIO_SAMPLE_RATE * AUDIO_CHANNELS * (AUDIO_BITS_PER_SAMPLE / 8))
+#define AUDIO_MAX_BYTES (AUDIO_BYTES_PER_SECOND * AUDIO_MAX_SECONDS)
 
 #define RLCD_SCK_PIN 11
 #define RLCD_MOSI_PIN 12
@@ -20,6 +41,17 @@ static ST7305_U8g2 lcd(RLCD_SCK_PIN, RLCD_MOSI_PIN, RLCD_DC_PIN, RLCD_CS_PIN, RL
 static U8G2 *u8g2 = nullptr;
 static uint8_t frame[FRAME_BYTES];
 static bool storageReady = false;
+static I2cMasterBus *audioI2c = nullptr;
+static CodecPort *codec = nullptr;
+static uint8_t *audioBuffer = nullptr;
+static size_t audioLength = 0;
+static bool recording = false;
+static bool keyPressed = false;
+static bool keyLongPress = false;
+static bool keyRawPressed = false;
+static bool keyStablePressed = false;
+static uint32_t keyChangedAt = 0;
+static uint32_t keyPressedAt = 0;
 
 struct GalleryState {
   uint32_t magic;
@@ -36,8 +68,38 @@ struct ButtonState {
   uint32_t changedAt;
 };
 
-static ButtonState keyButton = {KEY_PIN, HIGH, HIGH, 0};
 static ButtonState bootButton = {BOOT_PIN, HIGH, HIGH, 0};
+
+static bool loadDrawing(uint32_t index);
+static bool saveCurrentDrawing();
+
+static void writeLe16(uint8_t *target, uint16_t value) {
+  target[0] = value & 0xff;
+  target[1] = (value >> 8) & 0xff;
+}
+
+static void writeLe32(uint8_t *target, uint32_t value) {
+  target[0] = value & 0xff;
+  target[1] = (value >> 8) & 0xff;
+  target[2] = (value >> 16) & 0xff;
+  target[3] = (value >> 24) & 0xff;
+}
+
+static void finishWavHeader() {
+  uint32_t pcmLength = audioLength > WAV_HEADER_BYTES ? audioLength - WAV_HEADER_BYTES : 0;
+  memcpy(audioBuffer, "RIFF", 4);
+  writeLe32(audioBuffer + 4, pcmLength + 36);
+  memcpy(audioBuffer + 8, "WAVEfmt ", 8);
+  writeLe32(audioBuffer + 16, 16);
+  writeLe16(audioBuffer + 20, 1);
+  writeLe16(audioBuffer + 22, AUDIO_CHANNELS);
+  writeLe32(audioBuffer + 24, AUDIO_SAMPLE_RATE);
+  writeLe32(audioBuffer + 28, AUDIO_BYTES_PER_SECOND);
+  writeLe16(audioBuffer + 32, AUDIO_CHANNELS * (AUDIO_BITS_PER_SAMPLE / 8));
+  writeLe16(audioBuffer + 34, AUDIO_BITS_PER_SAMPLE);
+  memcpy(audioBuffer + 36, "data", 4);
+  writeLe32(audioBuffer + 40, pcmLength);
+}
 
 static bool readExact(uint8_t *data, size_t length, uint32_t timeoutMs) {
   size_t received = 0;
@@ -91,6 +153,102 @@ static void displayFrame() {
   u8g2->setDrawColor(1);
   u8g2->drawXBMP(0, 0, LCD_WIDTH, LCD_HEIGHT, frame);
   u8g2->sendBuffer();
+}
+
+static void restoreGalleryView() {
+  if (gallery.current > 0 && loadDrawing(gallery.current)) return;
+  showStatus("Huaban AI", storageReady ? "Gallery ready" : "Storage unavailable");
+}
+
+#if HUABAN_STANDALONE_ENABLED
+static bool connectWifi() {
+  if (WiFi.status() == WL_CONNECTED) return true;
+  showStatus("Connecting...", "Joining Wi-Fi");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(HUABAN_WIFI_SSID, HUABAN_WIFI_PASSWORD);
+  uint32_t startedAt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startedAt < 15000) delay(100);
+  return WiFi.status() == WL_CONNECTED;
+}
+
+static bool requestDrawing() {
+  if (audioLength <= WAV_HEADER_BYTES + AUDIO_BYTES_PER_SECOND / 4) {
+    showStatus("Too short", "Hold KEY and speak again");
+    delay(1800);
+    return false;
+  }
+  finishWavHeader();
+  if (!connectWifi()) {
+    showStatus("Wi-Fi failed", "Check secrets.h");
+    delay(2200);
+    return false;
+  }
+
+  showStatus("Drawing...", "AI is making your picture");
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(120000);
+  if (!http.begin(client, HUABAN_DEVICE_URL)) return false;
+  http.addHeader("Content-Type", "audio/wav");
+  if (strlen(HUABAN_DEVICE_TOKEN)) {
+    http.addHeader("Authorization", String("Bearer ") + HUABAN_DEVICE_TOKEN);
+  }
+  int status = http.POST(audioBuffer, audioLength);
+  int contentLength = http.getSize();
+  bool ok = status == HTTP_CODE_OK && (contentLength == FRAME_BYTES || contentLength < 0);
+  if (ok) {
+    WiFiClient *stream = http.getStreamPtr();
+    size_t received = stream->readBytes(frame, FRAME_BYTES);
+    ok = received == FRAME_BYTES;
+  }
+  http.end();
+
+  if (!ok) {
+    showStatus("Drawing failed", "Check Wi-Fi and server");
+    delay(2200);
+    return false;
+  }
+  displayFrame();
+  bool saved = saveCurrentDrawing();
+  Serial.println(saved ? "HUABAN_VOICE_OK" : "HUABAN_VOICE_NOT_SAVED");
+  return true;
+}
+#endif
+
+static void startRecording() {
+#if HUABAN_STANDALONE_ENABLED
+  if (!codec || !audioBuffer) {
+    showStatus("Mic unavailable", "Restart and try again");
+    return;
+  }
+  audioLength = WAV_HEADER_BYTES;
+  recording = true;
+  showStatus("Listening...", "Release KEY when finished");
+  Serial.println("HUABAN_LISTENING");
+#else
+  showStatus("Not configured", "Create secrets.h first");
+#endif
+}
+
+static void captureAudioChunk() {
+#if HUABAN_STANDALONE_ENABLED
+  if (!recording || audioLength >= WAV_HEADER_BYTES + AUDIO_MAX_BYTES) return;
+  size_t remaining = WAV_HEADER_BYTES + AUDIO_MAX_BYTES - audioLength;
+  size_t chunk = min((size_t)1024, remaining);
+  if (codec->CodecPort_EchoRead(audioBuffer + audioLength, chunk) == ESP_CODEC_DEV_OK) {
+    audioLength += chunk;
+  }
+#endif
+}
+
+static void stopRecording() {
+  if (!recording) return;
+  recording = false;
+  showStatus("Got it", "Sending your words...");
+#if HUABAN_STANDALONE_ENABLED
+  if (!requestDrawing()) restoreGalleryView();
+#endif
 }
 
 static void drawingPath(uint32_t index, char *path, size_t pathSize) {
@@ -159,8 +317,38 @@ static void handleButton(ButtonState &button, int direction) {
   loadDrawing((uint32_t)target);
 }
 
+static void handleKeyButton() {
+  bool rawPressed = digitalRead(KEY_PIN) == LOW;
+  if (rawPressed != keyRawPressed) {
+    keyRawPressed = rawPressed;
+    keyChangedAt = millis();
+  }
+  if (keyStablePressed != keyRawPressed && millis() - keyChangedAt >= 35) {
+    keyStablePressed = keyRawPressed;
+  }
+  bool pressed = keyStablePressed;
+  if (pressed && !keyPressed) {
+    keyPressed = true;
+    keyLongPress = false;
+    keyPressedAt = millis();
+  }
+  if (pressed && !keyLongPress && millis() - keyPressedAt >= KEY_LONG_PRESS_MS) {
+    keyLongPress = true;
+    startRecording();
+  }
+  if (pressed && keyLongPress) captureAudioChunk();
+  if (!pressed && keyPressed) {
+    keyPressed = false;
+    if (keyLongPress) stopRecording();
+    else if (gallery.count > 0) {
+      uint32_t target = gallery.current <= 1 ? gallery.count : gallery.current - 1;
+      loadDrawing(target);
+    }
+  }
+}
+
 static void handleButtons() {
-  handleButton(keyButton, -1);
+  handleKeyButton();
   handleButton(bootButton, 1);
 }
 
@@ -187,6 +375,15 @@ void setup() {
   lcd.begin(0, U8G2_R1);
   u8g2 = lcd.getU8g2();
   initStorage();
+#if HUABAN_STANDALONE_ENABLED
+  audioBuffer = (uint8_t *)heap_caps_malloc(WAV_HEADER_BYTES + AUDIO_MAX_BYTES, MALLOC_CAP_SPIRAM);
+  if (audioBuffer) {
+    audioI2c = new I2cMasterBus(14, 13, 0);
+    codec = new CodecPort(*audioI2c, "S3_RLCD_4_2");
+    codec->CodecPort_SetInfo("es7210", 1, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_BITS_PER_SAMPLE);
+    codec->CodecPort_SetMicGain(35);
+  }
+#endif
   if (gallery.current == 0 || !loadDrawing(gallery.current)) {
     showStatus("Huaban AI", storageReady ? "Gallery ready" : "Storage unavailable");
   }

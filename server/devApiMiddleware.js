@@ -1,5 +1,6 @@
 import { createRealtimeSession } from '../shared/realtimeCore.js';
 import { generateScreenDrawing } from '../shared/imageGenerationCore.js';
+import { createDeviceDrawing, deviceRequestAuthorized } from '../shared/deviceDrawingCore.js';
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -25,6 +26,41 @@ function sendJson(res, status, data) {
 export function createDevApiMiddleware() {
   return async (req, res, next) => {
     const url = req.url?.split('?')[0];
+
+    if (url === '/api/device-draw' && req.method === 'POST') {
+      if (!deviceRequestAuthorized(req.headers.authorization)) {
+        sendJson(res, 401, { ok: false, reason: 'unauthorized' });
+        return;
+      }
+      try {
+        const chunks = [];
+        let size = 0;
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > 4 * 1024 * 1024) throw new Error('audio_too_large');
+          chunks.push(chunk);
+        }
+        const wav = Buffer.concat(chunks);
+        if (wav.length < 48 || wav.toString('ascii', 0, 4) !== 'RIFF') {
+          sendJson(res, 400, { ok: false, reason: 'invalid_wav' });
+          return;
+        }
+        const result = await createDeviceDrawing(wav);
+        if (!result?.ok) {
+          sendJson(res, 400, result);
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Length', result.frame.length);
+        res.setHeader('X-Huaban-Prompt', encodeURIComponent(result.transcript));
+        res.end(result.frame);
+      } catch (err) {
+        console.error('[api/device-draw]', err);
+        sendJson(res, 500, { ok: false, reason: err?.message || 'device_draw_failed' });
+      }
+      return;
+    }
 
     if (url === '/api/realtime-session' && req.method === 'POST') {
       try {
